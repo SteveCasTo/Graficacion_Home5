@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: pastito
+    env: static
+    staticPublishPath: .
+    # No build is needed for a plain static site. If you later add a build step, set it here:
+    # buildCommand: npm ci && npm run build
