@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulación de Pasto Mejorada</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        .controls {
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        .control-label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            color: #ccc;
+        }
+        input[type="range"] {
+            width: 150px;
+        }
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .stats {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="stats" class="stats">
+        <div>FPS: <span id="fps">--</span></div>
+        <div>Briznas: <span id="bladeCount">--</span></div>
+        <div>Viento Global: <span id="windStrength">--</span></div>
+    </div>
+
+    <script>
+        // ============= CONSTANTES =============
+        const CONFIG = {
+            CANVAS: {
+                WIDTH: 1000,
+                HEIGHT: 600
+            },
+            GRASS: {
+                MIN_HEIGHT: 80,
+                MAX_HEIGHT: 140,
+                BASE_OFFSET: 20,
+                MIN_BLADES: 10,
+                MAX_BLADES: 150
+            },
+            WIND: {
+                MIN_SPEED: 0.005,
+                MAX_SPEED: 0.05,
+                MIN_AMP: 5,
+                MAX_AMP: 40,
+                GUST_FREQUENCY: 0.002
+            },
+            COLORS: {
+                GRASS_HUE_MIN: 80,
+                GRASS_HUE_MAX: 120,
+                GRASS_SAT_MIN: 60,
+                GRASS_SAT_MAX: 90,
+                GRASS_BRIGHT_MIN: 30,
+                GRASS_BRIGHT_MAX: 70
+            },
+            PERFORMANCE: {
+                LOD_DISTANCE_THRESHOLD: 200,
+                MIN_RESOLUTION: 3,
+                MAX_RESOLUTION: 25,
+                CACHE_TOLERANCE: 0.1
+            }
+        };
+
+        // ============= POOL DE VECTORES =============
+        class VectorPool {
+            constructor(size = 200) {
+                this.pool = [];
+                this.available = [];
+                
+                for (let i = 0; i < size; i++) {
+                    let v = createVector(0, 0);
+                    this.pool.push(v);
+                    this.available.push(v);
+                }
+            }
+            
+            get(x = 0, y = 0) {
+                if (this.available.length > 0) {
+                    let v = this.available.pop();
+                    return v.set(x, y);
+                }
+                return createVector(x, y); // fallback si se agota el pool
+            }
+            
+            release(vector) {
+                if (this.available.length < this.pool.length) {
+                    this.available.push(vector);
+                }
+            }
+            
+            releaseAll(vectors) {
+                vectors.forEach(v => this.release(v));
+            }
+        }
+
+        // ============= SISTEMA DE VIENTO =============
+        class WindSystem {
+            constructor() {
+                this.baseWind = 0;
+                this.gusts = [];
+                this.globalPhase = 0;
+                this.time = 0;
+                this.settings = {
+                    strength: 15,
+                    gustProbability: 0.001
+                };
+            }
+            
+            update() {
+                this.time += 1;
+                this.globalPhase += 0.01;
+                
+                // Viento base con ruido Perlin
+                this.baseWind = noise(this.time * 0.005) * this.settings.strength;
+                
+                // Generar ráfagas ocasionales
+                if (random() < this.settings.gustProbability) {
+                    this.gusts.push({
+                        strength: random(10, 30),
+                        duration: random(30, 120),
+                        age: 0,
+                        phase: random(TWO_PI)
+                    });
+                }
+                
+                // Actualizar ráfagas
+                this.gusts = this.gusts.filter(gust => {
+                    gust.age++;
+                    return gust.age < gust.duration;
+                });
+            }
+            
+            getWindAt(x, y, phase, speed, amp) {
+                let wind = this.baseWind;
+                
+                // Añadir ráfagas
+                this.gusts.forEach(gust => {
+                    let gustInfluence = map(gust.age, 0, gust.duration, 1, 0);
+                    gustInfluence = easeInOutSine(gustInfluence);
+                    wind += gust.strength * gustInfluence * sin(this.time * 0.05 + gust.phase);
+                });
+                
+                // Movimiento individual de la brizna
+                wind += sin(this.time * speed + phase) * amp;
+                
+                return wind * (this.settings.strength / 20);
+            }
+            
+            setStrength(strength) {
+                this.settings.strength = strength;
+            }
+        }
+
+        // ============= BRIZNA MEJORADA =============
+        class Blade {
+            constructor(x, vectorPool) {
+                this.pool = vectorPool;
+                this.base = this.pool.get(x, CONFIG.CANVAS.HEIGHT - CONFIG.GRASS.BASE_OFFSET);
+                
+                let h = random(CONFIG.GRASS.MIN_HEIGHT, CONFIG.GRASS.MAX_HEIGHT);
+                let dx = random(-30, 30);
+                this.tip = this.pool.get(x + dx, CONFIG.CANVAS.HEIGHT - CONFIG.GRASS.BASE_OFFSET - h);
+                
+                // Punto de control para curvatura
+                let cx = (this.base.x + this.tip.x) / 2 + random(-50, 50);
+                let cy = (this.base.y + this.tip.y) / 2 - random(40, 100);
+                this.ctrl = this.pool.get(cx, cy);
+                
+                // Color más natural usando HSB
+                colorMode(HSB);
+                let hue = random(CONFIG.COLORS.GRASS_HUE_MIN, CONFIG.COLORS.GRASS_HUE_MAX);
+                let sat = random(CONFIG.COLORS.GRASS_SAT_MIN, CONFIG.COLORS.GRASS_SAT_MAX);
+                let bright = random(CONFIG.COLORS.GRASS_BRIGHT_MIN, CONFIG.COLORS.GRASS_BRIGHT_MAX);
+                this.color = color(hue, sat, bright);
+                colorMode(RGB);
+                
+                // Parámetros de animación
+                this.phase = random(TWO_PI);
+                this.speed = random(CONFIG.WIND.MIN_SPEED, CONFIG.WIND.MAX_SPEED);
+                this.amp = random(CONFIG.WIND.MIN_AMP, CONFIG.WIND.MAX_AMP);
+                
+                // Cache para optimización
+                this.cachedPoints = null;
+                this.lastWindValue = -999;
+                this.lastResolution = -1;
+                
+                // LOD
+                this.distanceFromCenter = abs(x - CONFIG.CANVAS.WIDTH / 2);
+            }
+            
+            calculatePoints(wind, resolution) {
+                // Verificar si necesitamos recalcular
+                if (this.cachedPoints && 
+                    abs(wind - this.lastWindValue) < CONFIG.PERFORMANCE.CACHE_TOLERANCE &&
+                    resolution === this.lastResolution) {
+                    return this.cachedPoints;
+                }
+                
+                let cx = this.ctrl.x + wind;
+                let cy = this.ctrl.y;
+                
+                // Liberar puntos anteriores del pool
+                if (this.cachedPoints) {
+                    this.pool.releaseAll(this.cachedPoints);
+                }
+                
+                let pts = [];
+                for (let i = 0; i <= resolution; i++) {
+                    let u = i / resolution;
+                    let x = (1 - u) * (1 - u) * this.base.x +
+                            2 * (1 - u) * u * cx +
+                            u * u * this.tip.x;
+                    let y = (1 - u) * (1 - u) * this.base.y +
+                            2 * (1 - u) * u * cy +
+                            u * u * this.tip.y;
+                    pts.push(this.pool.get(x, y));
+                }
+                
+                this.cachedPoints = pts;
+                this.lastWindValue = wind;
+                this.lastResolution = resolution;
+                return pts;
+            }
+            
+            getLODResolution(baseResolution) {
+                // Reducir resolución para briznas lejanas
+                if (this.distanceFromCenter > CONFIG.PERFORMANCE.LOD_DISTANCE_THRESHOLD) {
+                    return max(CONFIG.PERFORMANCE.MIN_RESOLUTION, floor(baseResolution * 0.5));
+                }
+                return baseResolution;
+            }
+            
+            draw(windSystem, settings) {
+                let wind = windSystem.getWindAt(this.base.x, this.base.y, this.phase, this.speed, this.amp);
+                let resolution = this.getLODResolution(settings.resolution);
+                let pts = this.calculatePoints(wind, resolution);
+                
+                // Calcular contorno si se necesita relleno
+                if (settings.showFill) {
+                    let w = settings.width;
+                    let left = [];
+                    let right = [];
+                    
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        let p = pts[i];
+                        let q = pts[i + 1];
+                        let ang = atan2(q.y - p.y, q.x - p.x) + HALF_PI;
+                        let widthFactor = sin((i / (pts.length - 1)) * PI);
+                        let d = w * widthFactor;
+                        left.push(this.pool.get(p.x + d * cos(ang), p.y + d * sin(ang)));
+                        right.push(this.pool.get(p.x - d * cos(ang), p.y - d * sin(ang)));
+                    }
+                    
+                    // Relleno
+                    noStroke();
+                    fill(this.color);
+                    beginShape();
+                    for (let v of left) vertex(v.x, v.y);
+                    vertex(this.tip.x + wind, this.tip.y);
+                    for (let i = right.length - 1; i >= 0; i--) vertex(right[i].x, right[i].y);
+                    endShape(CLOSE);
+                    
+                    // Liberar vectores temporales
+                    this.pool.releaseAll(left);
+                    this.pool.releaseAll(right);
+                }
+                
+                // Esqueleto
+                if (settings.showSkeleton && this.distanceFromCenter < CONFIG.PERFORMANCE.LOD_DISTANCE_THRESHOLD) {
+                    stroke(100, 200, 50, 150);
+                    strokeWeight(1);
+                    let w = settings.width * 0.7;
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        let p = pts[i];
+                        let q = pts[i + 1];
+                        let ang = atan2(q.y - p.y, q.x - p.x) + HALF_PI;
+                        let widthFactor = sin((i / (pts.length - 1)) * PI);
+                        let d = w * widthFactor;
+                        line(p.x + d * cos(ang), p.y + d * sin(ang), 
+                             p.x - d * cos(ang), p.y - d * sin(ang));
+                    }
+                }
+                
+                // Espina dorsal
+                stroke(0, 160, 20);
+                strokeWeight(1.5);
+                noFill();
+                beginShape();
+                for (let p of pts) {
+                    vertex(p.x, p.y);
+                }
+                endShape();
+            }
+            
+            destroy() {
+                // Limpiar vectores al destruir la brizna
+                if (this.cachedPoints) {
+                    this.pool.releaseAll(this.cachedPoints);
+                }
+                this.pool.release(this.base);
+                this.pool.release(this.tip);
+                this.pool.release(this.ctrl);
+            }
+        }
+
+        // ============= INTERFAZ DE USUARIO =============
+        class UI {
+            constructor(simulation) {
+                this.sim = simulation;
+                this.sliders = {};
+                this.checkboxes = {};
+                this.setupControls();
+            }
+            
+            setupControls() {
+                let y = 60;
+                const spacing = 40;
+                
+                // Crear sliders
+                this.sliders.numBlades = this.createSlider("Número de Briznas", 
+                    CONFIG.GRASS.MIN_BLADES, CONFIG.GRASS.MAX_BLADES, this.sim.settings.numBlades, 1, y);
+                y += spacing;
+                
+                this.sliders.resolution = this.createSlider("Resolución", 
+                    CONFIG.PERFORMANCE.MIN_RESOLUTION, CONFIG.PERFORMANCE.MAX_RESOLUTION, this.sim.settings.resolution, 1, y);
+                y += spacing;
+                
+                this.sliders.width = this.createSlider("Ancho", 
+                    2, 15, this.sim.settings.width, 0.5, y);
+                y += spacing;
+                
+                this.sliders.wind = this.createSlider("Fuerza del Viento", 
+                    0, 50, this.sim.settings.wind, 1, y);
+                y += spacing;
+                
+                // Checkboxes
+                this.checkboxes.showFill = this.createCheckbox("Mostrar Relleno", this.sim.settings.showFill, y);
+                y += 25;
+                this.checkboxes.showSkeleton = this.createCheckbox("Mostrar Esqueleto", this.sim.settings.showSkeleton, y);
+            }
+            
+            createSlider(label, min, max, defaultValue, step, y) {
+                let container = createDiv();
+                container.position(30, y);
+                container.style('color', 'white');
+                container.style('font-size', '12px');
+                
+                let labelDiv = createDiv(label);
+                labelDiv.parent(container);
+                
+                let slider = createSlider(min, max, defaultValue, step);
+                slider.parent(container);
+                slider.style('width', '150px');
+                
+                let valueSpan = createSpan(': ' + defaultValue);
+                valueSpan.parent(container);
+                valueSpan.id(label + '_value');
+                
+                slider.input(() => {
+                    valueSpan.html(': ' + slider.value());
+                    this.onSettingChange(label, slider.value());
+                });
+                
+                return slider;
+            }
+            
+            createCheckbox(label, defaultValue, y) {
+                let checkbox = createCheckbox(label, defaultValue);
+                checkbox.position(30, y);
+                checkbox.style('color', 'white');
+                checkbox.style('font-size', '12px');
+                
+                checkbox.changed(() => {
+                    this.onSettingChange(label, checkbox.checked());
+                });
+                
+                return checkbox;
+            }
+            
+            onSettingChange(setting, value) {
+                switch(setting) {
+                    case "Número de Briznas":
+                        this.sim.setNumBlades(value);
+                        break;
+                    case "Resolución":
+                        this.sim.settings.resolution = value;
+                        break;
+                    case "Ancho":
+                        this.sim.settings.width = value;
+                        break;
+                    case "Fuerza del Viento":
+                        this.sim.windSystem.setStrength(value);
+                        this.sim.settings.wind = value;
+                        break;
+                    case "Mostrar Relleno":
+                        this.sim.settings.showFill = value;
+                        break;
+                    case "Mostrar Esqueleto":
+                        this.sim.settings.showSkeleton = value;
+                        break;
+                }
+            }
+        }
+
+        // ============= SIMULACIÓN PRINCIPAL =============
+        class GrassSimulation {
+            constructor() {
+                this.vectorPool = new VectorPool();
+                this.windSystem = new WindSystem();
+                this.blades = [];
+                this.ui = null;
+                
+                this.settings = {
+                    numBlades: 60,
+                    resolution: 12,
+                    width: 6,
+                    wind: 15,
+                    showSkeleton: true,
+                    showFill: true
+                };
+                
+                // Stats para rendimiento
+                this.frameHistory = [];
+                this.lastStatsUpdate = 0;
+            }
+            
+            init() {
+                this.generateBlades();
+                this.ui = new UI(this);
+                this.windSystem.setStrength(this.settings.wind);
+            }
+            
+            generateBlades() {
+                // Limpiar briznas anteriores
+                this.blades.forEach(blade => blade.destroy());
+                this.blades = [];
+                
+                // Crear nuevas briznas
+                for (let i = 0; i < this.settings.numBlades; i++) {
+                    let x = random(50, CONFIG.CANVAS.WIDTH - 50);
+                    this.blades.push(new Blade(x, this.vectorPool));
+                }
+            }
+            
+            setNumBlades(num) {
+                this.settings.numBlades = num;
+                this.generateBlades();
+            }
+            
+            update() {
+                this.windSystem.update();
+                this.updateStats();
+            }
+            
+            updateStats() {
+                // Actualizar estadísticas de rendimiento
+                let now = millis();
+                if (now - this.lastStatsUpdate > 1000) {
+                    this.frameHistory.push(frameRate());
+                    if (this.frameHistory.length > 10) {
+                        this.frameHistory.shift();
+                    }
+                    
+                    let avgFps = this.frameHistory.reduce((a, b) => a + b, 0) / this.frameHistory.length;
+                    
+                    // Actualizar UI de stats
+                    document.getElementById('fps').textContent = avgFps.toFixed(1);
+                    document.getElementById('bladeCount').textContent = this.blades.length;
+                    document.getElementById('windStrength').textContent = this.windSystem.baseWind.toFixed(1);
+                    
+                    this.lastStatsUpdate = now;
+                }
+            }
+            
+            draw() {
+                // Fondo degradado
+                this.drawBackground();
+                
+                // Dibujar briznas en capas para mejor profundidad
+                this.drawGrassLayers();
+            }
+            
+            drawBackground() {
+                // Cielo degradado
+                for (let y = 0; y <= CONFIG.CANVAS.HEIGHT; y++) {
+                    let alpha = map(y, 0, CONFIG.CANVAS.HEIGHT, 0, 1);
+                    let c = lerpColor(color(20, 30, 50), color(5, 10, 20), alpha);
+                    stroke(c);
+                    line(0, y, CONFIG.CANVAS.WIDTH, y);
+                }
+            }
+            
+            drawGrassLayers() {
+                // Ordenar briznas por distancia para profundidad
+                let sortedBlades = [...this.blades].sort((a, b) => b.distanceFromCenter - a.distanceFromCenter);
+                
+                // Dibujar en capas
+                let layers = [
+                    sortedBlades.filter(b => b.distanceFromCenter > CONFIG.PERFORMANCE.LOD_DISTANCE_THRESHOLD),
+                    sortedBlades.filter(b => b.distanceFromCenter <= CONFIG.PERFORMANCE.LOD_DISTANCE_THRESHOLD)
+                ];
+                
+                layers.forEach((layer, index) => {
+                    // Aplicar alpha para profundidad
+                    let alpha = index === 0 ? 0.7 : 1.0;
+                    
+                    layer.forEach(blade => {
+                        push();
+                        if (index === 0) {
+                            // Capa de fondo más tenue
+                            tint(255, alpha * 255);
+                        }
+                        blade.draw(this.windSystem, this.settings);
+                        pop();
+                    });
+                });
+            }
+        }
+
+        // ============= FUNCIONES AUXILIARES =============
+        function easeInOutSine(t) {
+            return -(cos(PI * t) - 1) / 2;
+        }
+
+        // ============= VARIABLES GLOBALES =============
+        let grassSim;
+
+        // ============= FUNCIONES P5.JS =============
+        function setup() {
+            createCanvas(CONFIG.CANVAS.WIDTH, CONFIG.CANVAS.HEIGHT);
+            grassSim = new GrassSimulation();
+            grassSim.init();
+        }
+
+        function draw() {
+            grassSim.update();
+            grassSim.draw();
+        }
+
+        function windowResized() {
+            // Opcional: redimensionar canvas si es necesario
+        }
+
+        function keyPressed() {
+            if (key === 'r' || key === 'R') {
+                grassSim.generateBlades();
+            }
+        }
+    </script>
+</body>
+</html>
