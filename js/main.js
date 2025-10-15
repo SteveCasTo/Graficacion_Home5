@@ -1,4 +1,5 @@
 let grassSim;
+let canvas;
 let enhancedFeatures;
 let loading = true;
 let loadingStart = 0;
@@ -6,8 +7,10 @@ let loadingMinTime = 1200; // ms
 
 // Configuración inicial de p5.js
 function setup() {
-    // Crear canvas con las dimensiones configuradas
-    createCanvas(CONFIG.CANVAS.WIDTH, CONFIG.CANVAS.HEIGHT);
+    // Detectar altura real del header (se asume id="header")
+    let header = document.getElementById('header');
+    let headerHeight = header ? header.offsetHeight : 48;
+    canvas = createCanvas(window.innerWidth, window.innerHeight - headerHeight);
     loading = true;
     loadingStart = millis();
     // Inicialización diferida en draw()
@@ -28,17 +31,19 @@ function draw() {
         }
         return;
     }
+    // El canvas siempre debe estar en la parte superior. El margen visual se maneja por CSS o en el dibujo.
     grassSim.update();
     grassSim.draw();
     // Dibujar partículas verdes desprendidas
     if (typeof drawDetachedParticles === 'function') drawDetachedParticles();
+
 // Pantalla de carga animada con pasto/curva Bézier
 function drawLoadingScreen() {
     background(30, 45, 40);
     // Animar varias briznas de pasto con curvas Bézier
     let t = millis() * 0.002;
     let centerX = width / 2;
-    let baseY = height * 0.82;
+    let baseY = height * 0.65;
     let numBlades = 13;
     for (let i = 0; i < numBlades; i++) {
         let x = centerX - 120 + i * 20 + sin(t + i) * 8;
@@ -71,11 +76,9 @@ function windowResized() {
     if (grassSim) {
         grassSim.onWindowResize();
     }
-    
-    // Redimensionar canvas manteniendo proporciones
-    const newWidth = min(windowWidth - 40, CONFIG.CANVAS.WIDTH);
-    const newHeight = min(windowHeight - 40, CONFIG.CANVAS.HEIGHT);
-    resizeCanvas(newWidth, newHeight);
+    let header = document.getElementById('header');
+    let headerHeight = header ? header.offsetHeight : 48;
+    resizeCanvas(window.innerWidth, window.innerHeight - headerHeight);
 }
 
 // Función llamada cuando se presiona una tecla

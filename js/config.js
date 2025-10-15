@@ -1,13 +1,13 @@
 // ============= CONFIGURACIÓN GLOBAL =============
 const CONFIG = {
     CANVAS: {
-        WIDTH: 1000,
-        HEIGHT: 600
+        get WIDTH() { return window.innerWidth; },
+        get HEIGHT() { return window.innerHeight; }
     },
     GRASS: {
         MIN_HEIGHT: 80,
         MAX_HEIGHT: 140,
-        BASE_OFFSET: 20,
+        BASE_OFFSET: 90, // Antes 20. Aumentado para que el pasto esté más arriba
         MIN_BLADES: 10,
         MAX_BLADES: 150
     },
