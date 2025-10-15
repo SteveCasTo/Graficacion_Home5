@@ -13,7 +13,7 @@ function mapWithEasing(value, start1, stop1, start2, stop2, easingFunc = null) {
 }
 
 // Clamp un valor entre un mínimo y un máximo
-function clamp(value, min, max) {
+function clampValue(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
 

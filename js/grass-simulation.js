@@ -42,7 +42,7 @@ class GrassSimulation {
     
     // Actualiza la cantidad de briznas
     setNumBlades(num) {
-        this.settings.numBlades = clamp(num, CONFIG.GRASS.MIN_BLADES, CONFIG.GRASS.MAX_BLADES);
+        this.settings.numBlades = clampValue(num, CONFIG.GRASS.MIN_BLADES, CONFIG.GRASS.MAX_BLADES);
         this.generateBlades();
     }
     

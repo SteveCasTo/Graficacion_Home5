@@ -55,12 +55,12 @@ class WindSystem {
     
     // Establece la fuerza base del viento
     setStrength(strength) {
-        this.settings.strength = clamp(strength, 0, 100);
+        this.settings.strength = clampValue(strength, 0, 100);
     }
     
     // Establece la probabilidad de ráfagas
     setGustProbability(probability) {
-        this.settings.gustProbability = clamp(probability, 0, 0.01);
+        this.settings.gustProbability = clampValue(probability, 0, 0.01);
     }
 
     // Obtiene estadísticas del sistema de viento
