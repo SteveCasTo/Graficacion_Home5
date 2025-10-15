@@ -1,34 +1,69 @@
 let grassSim;
 let enhancedFeatures;
+let loading = true;
+let loadingStart = 0;
+let loadingMinTime = 1200; // ms
 
 // Configuración inicial de p5.js
 function setup() {
     // Crear canvas con las dimensiones configuradas
     createCanvas(CONFIG.CANVAS.WIDTH, CONFIG.CANVAS.HEIGHT);
-    
-    // Inicializar la simulación
-    grassSim = new GrassSimulation();
-    grassSim.init();
-    
-    // Inicializar características mejoradas
-    enhancedFeatures = new EnhancedFeatures(grassSim);
-    
-    console.log('🌱 Simulación de pasto inicializada');
-    console.log('💡 Controles disponibles:');
-    console.log('  - R: Regenerar briznas');
-    console.log('  - F: Pantalla completa');
-    console.log('  - H: Toggle interfaz');
-    console.log('  - P: Exportar imagen');
-    console.log('  - +/-: Cambiar cantidad');
-    console.log('  - Espacio: Pausar/reanudar');
-    console.log('  - Click: Crear ráfaga de viento');
-    console.log('  - ?: Mostrar ayuda');
+    loading = true;
+    loadingStart = millis();
+    // Inicialización diferida en draw()
 }
 
 // Bucle principal de p5.js
 function draw() {
+    if (loading) {
+        drawLoadingScreen();
+        // Esperar mínimo loadingMinTime ms antes de iniciar
+        if (millis() - loadingStart > loadingMinTime) {
+            if (!grassSim) {
+                grassSim = new GrassSimulation();
+                grassSim.init();
+                enhancedFeatures = new EnhancedFeatures(grassSim);
+                setTimeout(() => { loading = false; }, 350); // transición breve
+            }
+        }
+        return;
+    }
     grassSim.update();
     grassSim.draw();
+    // Dibujar partículas verdes desprendidas
+    if (typeof drawDetachedParticles === 'function') drawDetachedParticles();
+// Pantalla de carga animada con pasto/curva Bézier
+function drawLoadingScreen() {
+    background(30, 45, 40);
+    // Animar varias briznas de pasto con curvas Bézier
+    let t = millis() * 0.002;
+    let centerX = width / 2;
+    let baseY = height * 0.82;
+    let numBlades = 13;
+    for (let i = 0; i < numBlades; i++) {
+        let x = centerX - 120 + i * 20 + sin(t + i) * 8;
+        let bladeH = 80 + 30 * sin(t * 1.2 + i * 0.7);
+        let tipX = x + 12 * sin(t * 1.5 + i * 0.9);
+        let tipY = baseY - bladeH;
+        let c1x = x + 8 * sin(t + i * 0.5);
+        let c1y = baseY - bladeH * 0.4;
+        let c2x = x + 16 * sin(t * 1.1 + i * 0.8);
+        let c2y = baseY - bladeH * 0.7;
+        stroke(110 + i * 2, 200, 110 + i * 3);
+        strokeWeight(3.2 - abs(i - numBlades/2) * 0.13);
+        noFill();
+        bezier(x, baseY, c1x, c1y, c2x, c2y, tipX, tipY);
+    }
+    // Texto de carga
+    noStroke();
+    fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(32);
+    text('Cargando Pastito...', width/2, height*0.36);
+    textSize(16);
+    fill(180);
+    text('Simulación interactiva de pasto', width/2, height*0.36 + 36);
+}
 }
 
 // Función llamada al redimensionar la ventana
@@ -52,13 +87,12 @@ function keyPressed() {
 
 // Función llamada cuando se presiona el mouse
 function mousePressed() {
+    // El manejo del mouse se hace en enhanced-features.js
 }
 
 // Función llamada cuando se arrastra el mouse
 function mouseDragged() {
-    if (enhancedFeatures && frameCount % 5 === 0) { // Solo cada 5 frames para no sobrecargar
-        enhancedFeatures.createWindGust(mouseX, mouseY);
-    }
+    // El manejo del arrastre se hace en enhanced-features.js
 }
 
 window.addEventListener('beforeunload', () => {

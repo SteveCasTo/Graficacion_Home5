@@ -4,20 +4,24 @@ class GrassSimulation {
         this.windSystem = new WindSystem();
         this.blades = [];
         this.ui = null;
-        
+        this.isNight = true;
+        this.dayNightLerp = 1; // 1 = noche, 0 = día
         // Configuración por defecto
         this.settings = {
             numBlades: 60,
-            resolution: 12,
+            resolution: 20, // Aumentado de 12 a 20 para curvas más suaves
             width: 6,
             wind: 15,
             showSkeleton: true,
             showFill: true
         };
-        
         // Estadísticas de rendimiento
         this.frameHistory = [];
         this.lastStatsUpdate = 0;
+    }
+
+    toggleDayNight() {
+        this.isNight = !this.isNight;
     }
     
     // Inicializa la simulación
@@ -48,8 +52,11 @@ class GrassSimulation {
     
     // Actualiza la simulación
     update() {
-        this.windSystem.update();
-        this.updateStats();
+    this.windSystem.update();
+    this.updateStats();
+    // Transición suave día/noche
+    let target = this.isNight ? 1 : 0;
+    this.dayNightLerp += (target - this.dayNightLerp) * 0.08;
     }
     
     // Actualiza estadísticas de rendimiento
@@ -90,10 +97,16 @@ class GrassSimulation {
     
     // Dibuja el fondo degradado
     drawBackground() {
-        // Cielo degradado de arriba a abajo
+        // Colores día/noche
+        let nightTop = color(20, 30, 50);
+        let nightBot = color(5, 10, 20);
+        let dayTop = color(120, 200, 255);
+        let dayBot = color(180, 240, 180);
+        let topCol = lerpColor(dayTop, nightTop, this.dayNightLerp);
+        let botCol = lerpColor(dayBot, nightBot, this.dayNightLerp);
         for (let y = 0; y <= CONFIG.CANVAS.HEIGHT; y++) {
             let alpha = map(y, 0, CONFIG.CANVAS.HEIGHT, 0, 1);
-            let c = lerpColor(color(20, 30, 50), color(5, 10, 20), alpha);
+            let c = lerpColor(topCol, botCol, alpha);
             stroke(c);
             line(0, y, CONFIG.CANVAS.WIDTH, y);
         }

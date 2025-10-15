@@ -4,8 +4,13 @@
  * Añade funcionalidades extras a la simulación
  */
 class EnhancedFeatures {
+    // Partículas verdes desprendidas
+    static detachedParticles = [];
     constructor(grassSim) {
         this.grassSim = grassSim;
+        this.isMouseDown = false;
+        this.lastMouseX = 0;
+        this.lastMouseY = 0;
         this.setupKeyboardShortcuts();
         this.setupMouseInteraction();
         this.setupTouchSupport();
@@ -74,43 +79,95 @@ class EnhancedFeatures {
      * Configura eventos del canvas
      */
     setupCanvasEvents(canvas) {
-        // Crear ráfaga de viento al hacer clic
-        canvas.addEventListener('click', (e) => {
+        // Detectar cuando se presiona el mouse
+        canvas.addEventListener('mousedown', (e) => {
+            this.isMouseDown = true;
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            this.lastMouseX = e.clientX - rect.left;
+            this.lastMouseY = e.clientY - rect.top;
             
-            this.createWindGust(x, y);
-            this.createClickEffect(x, y);
+            // Crear ráfaga inicial al hacer clic (reducido un poco la fuerza)
+            this.createWindGust(this.lastMouseX, this.lastMouseY, 40, 100);
+            this.createClickEffect(this.lastMouseX, this.lastMouseY);
+
+            // Crear partículas verdes desprendidas (punto medio)
+            for (let i = 0; i < 9; i++) {
+                EnhancedFeatures.detachedParticles.push({
+                    x: this.lastMouseX,
+                    y: this.lastMouseY,
+                    vx: random(-2, 2),
+                    vy: random(-3.2, -1.2),
+                    life: random(16, 26),
+                    age: 0,
+                    color: color(random(80, 120), random(200, 255), random(80, 120), 170)
+                });
+            }
+        });
+// Dibuja y actualiza partículas verdes desprendidas
+window.drawDetachedParticles = function() {
+    if (!window.p5) return;
+    for (let i = EnhancedFeatures.detachedParticles.length - 1; i >= 0; i--) {
+        let p = EnhancedFeatures.detachedParticles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.18; // gravedad
+        p.vx *= 0.97;
+        p.vy *= 0.97;
+        p.age++;
+        noStroke();
+        fill(p.color);
+        ellipse(p.x, p.y, 3.1 + (p.life - p.age) * 0.09, 1.7 + (p.life - p.age) * 0.06);
+        if (p.age > p.life) {
+            EnhancedFeatures.detachedParticles.splice(i, 1);
+        }
+    }
+};
+        
+        // Detectar cuando se suelta el mouse
+        canvas.addEventListener('mouseup', () => {
+            this.isMouseDown = false;
         });
         
-        // Efecto de hover
+        // Detectar cuando el mouse sale del canvas
+        canvas.addEventListener('mouseleave', () => {
+            this.isMouseDown = false;
+        });
+        
+        // Movimiento del mouse (arrastre continuo)
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             
-            // Crear suave influencia del mouse
-            this.createMouseInfluence(x, y);
+            // Si está arrastrando, crear viento continuo
+            if (this.isMouseDown) {
+                // Crear ráfagas más suaves para movimiento continuo
+                this.createWindGust(x, y, 28, 40);
+            }
+            
+            this.lastMouseX = x;
+            this.lastMouseY = y;
         });
     }
     
     /**
      * Crea una ráfaga de viento en la posición especificada
      */
-    createWindGust(x, y) {
+    createWindGust(x, y, strength = null, duration = null, radius = null) {
         if (this.grassSim.windSystem.gusts) {
-            this.grassSim.windSystem.gusts.push({
-                strength: 25 + Math.random() * 15,
-                duration: 60 + Math.random() * 40,
-                age: 0,
-                phase: Math.random() * Math.PI * 2,
-                x: x,
-                y: y,
-                radius: 100 + Math.random() * 50
-            });
+            // Solo crear si no hemos alcanzado el límite
+            if (this.grassSim.windSystem.gusts.length < this.grassSim.windSystem.maxGusts) {
+                this.grassSim.windSystem.gusts.push({
+                    strength: strength || (30 + Math.random() * 15), // Reducido de 35-55 a 30-45
+                    duration: duration || (60 + Math.random() * 40),
+                    age: 0,
+                    phase: Math.random() * Math.PI * 2,
+                    x: x,
+                    y: y,
+                    radius: radius || (150 + Math.random() * 80)
+                });
+            }
         }
-        this.createGustVisualEffect(x, y);
     }
     
     /**
@@ -346,39 +403,55 @@ class EnhancedFeatures {
      */
     addShortcutHelp() {
         const helpButton = document.createElement('div');
+        helpButton.setAttribute('tabindex', '0');
+        helpButton.setAttribute('aria-label', 'Ayuda e instrucciones');
         helpButton.style.cssText = `
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 40px;
-            height: 40px;
-            background: linear-gradient(45deg, rgba(76, 175, 80, 0.8), rgba(76, 175, 80, 0.6));
+            bottom: 32px;
+            right: 32px;
+            width: 54px;
+            height: 54px;
+            background: linear-gradient(120deg, #4CAF50 80%, #81C784 100%);
+            box-shadow: 0 4px 24px 0 rgba(76,175,80,0.25);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            font-size: 20px;
-            color: white;
-            z-index: 1000;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
+            font-size: 32px;
+            color: #fff;
+            z-index: 2000;
+            transition: all 0.2s cubic-bezier(.4,2,.6,1);
+            border: 2.5px solid #fff;
+            outline: none;
+            user-select: none;
         `;
-        helpButton.textContent = '?';
-        
+        helpButton.innerHTML = '<span style="font-weight:bold; font-size:32px;">?</span>';
+
         helpButton.addEventListener('mouseenter', () => {
-            helpButton.style.transform = 'scale(1.1)';
+            helpButton.style.transform = 'scale(1.13)';
+            helpButton.style.boxShadow = '0 8px 32px 0 rgba(76,175,80,0.35)';
         });
-        
         helpButton.addEventListener('mouseleave', () => {
             helpButton.style.transform = 'scale(1)';
+            helpButton.style.boxShadow = '0 4px 24px 0 rgba(76,175,80,0.25)';
         });
-        
+        helpButton.addEventListener('focus', () => {
+            helpButton.style.transform = 'scale(1.13)';
+            helpButton.style.boxShadow = '0 8px 32px 0 rgba(76,175,80,0.35)';
+        });
+        helpButton.addEventListener('blur', () => {
+            helpButton.style.transform = 'scale(1)';
+            helpButton.style.boxShadow = '0 4px 24px 0 rgba(76,175,80,0.25)';
+        });
         helpButton.addEventListener('click', () => {
             this.showShortcutsHelp();
         });
-        
+        helpButton.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                this.showShortcutsHelp();
+            }
+        });
         document.body.appendChild(helpButton);
     }
     
@@ -391,60 +464,73 @@ class EnhancedFeatures {
             position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.8);
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0.85);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 10000;
-            backdrop-filter: blur(5px);
+            backdrop-filter: blur(6px);
         `;
-        
+
         const helpContent = document.createElement('div');
         helpContent.style.cssText = `
-            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-            padding: 30px;
-            border-radius: 20px;
-            color: white;
-            max-width: 400px;
-            border: 1px solid rgba(255,255,255,0.2);
-            backdrop-filter: blur(20px);
+            background: linear-gradient(135deg, rgba(255,255,255,0.13), rgba(76,175,80,0.10));
+            padding: 36px 32px 28px 32px;
+            border-radius: 24px;
+            color: #fff;
+            max-width: 440px;
+            border: 2px solid rgba(255,255,255,0.22);
+            box-shadow: 0 8px 40px rgba(76,175,80,0.18);
+            backdrop-filter: blur(24px);
         `;
-        
+
         helpContent.innerHTML = `
-            <h3 style="margin-top: 0; text-align: center; color: #4CAF50;">🌱 Atajos de Teclado</h3>
-            <div style="line-height: 1.8; font-size: 14px;">
-                <p><strong>F</strong> - Toggle pantalla completa</p>
-                <p><strong>H</strong> - Mostrar/ocultar interfaz</p>
-                <p><strong>P</strong> - Exportar imagen</p>
-                <p><strong>R</strong> - Regenerar briznas</p>
-                <p><strong>+/-</strong> - Aumentar/reducir cantidad</p>
-                <p><strong>Espacio</strong> - Pausar/reanudar</p>
-                <p><strong>Click</strong> - Crear ráfaga de viento</p>
+            <h2 style="margin-top: 0; text-align: center; color: #4CAF50; font-size: 2rem;">🌱 Simulación de Pasto</h2>
+            <p style="text-align:center; margin-bottom:18px; color:#b2ffb2; font-size:1.08em;">Proyecto interactivo de simulación de pasto usando curvas Bézier y física de viento en p5.js.<br><span style='color:#fff;font-size:0.95em;'>Arrastra el mouse o haz clic para experimentar el viento.</span></p>
+            <div style="line-height: 1.8; font-size: 15px; margin-bottom: 10px;">
+                <strong>Controles rápidos:</strong>
+                <ul style='margin: 8px 0 0 18px; padding:0; color:#fff;'>
+                    <li><b>F</b>: Pantalla completa</li>
+                    <li><b>H</b>: Mostrar/ocultar interfaz</li>
+                    <li><b>P</b>: Exportar imagen</li>
+                    <li><b>R</b>: Regenerar pasto</li>
+                    <li><b>+/-</b>: Aumentar/reducir cantidad</li>
+                    <li><b>Espacio</b>: Pausar/reanudar</li>
+                    <li><b>Click/Arrastrar</b>: Viento local</li>
+                </ul>
             </div>
-            <div style="text-align: center; margin-top: 20px;">
+            <div style="text-align: center; margin-top: 24px;">
                 <button id="closeHelp" style="
-                    background: #4CAF50;
+                    background: linear-gradient(90deg, #4CAF50 80%, #81C784 100%);
                     color: white;
                     border: none;
-                    padding: 10px 20px;
-                    border-radius: 10px;
+                    padding: 12px 32px;
+                    border-radius: 12px;
                     cursor: pointer;
-                    font-weight: 600;
+                    font-weight: 700;
+                    font-size: 1.1em;
+                    box-shadow: 0 2px 12px rgba(76,175,80,0.18);
+                    transition: background 0.2s;
                 ">Entendido</button>
             </div>
         `;
-        
+
         helpModal.appendChild(helpContent);
         document.body.appendChild(helpModal);
-        
+
         // Cerrar modal
         const closeHelp = () => {
             helpModal.remove();
         };
-        
         document.getElementById('closeHelp').addEventListener('click', closeHelp);
+        helpModal.addEventListener('click', (e) => {
+            if (e.target === helpModal) closeHelp();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeHelp();
+        }, { once: true });
         helpModal.addEventListener('click', (e) => {
             if (e.target === helpModal) closeHelp();
         });

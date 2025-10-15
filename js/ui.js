@@ -5,6 +5,35 @@ class UI {
         this.sliders = {};
         this.checkboxes = {};
         this.setupControls();
+        this.addDayNightToggle();
+    }
+
+    // Botón de modo día/noche
+    addDayNightToggle() {
+        const btn = document.createElement('button');
+        btn.textContent = '🌙 Noche';
+        btn.style.cssText = `
+            position: fixed;
+            top: 24px;
+            right: 32px;
+            z-index: 1200;
+            background: linear-gradient(90deg, #222 60%, #4CAF50 100%);
+            color: #fff;
+            border: none;
+            border-radius: 16px;
+            padding: 10px 22px;
+            font-size: 1.1em;
+            font-weight: 600;
+            box-shadow: 0 2px 12px rgba(76,175,80,0.13);
+            cursor: pointer;
+            transition: background 0.2s;
+        `;
+        btn.id = 'dayNightToggleBtn';
+        btn.onclick = () => {
+            this.sim.toggleDayNight();
+            btn.textContent = this.sim.isNight ? '☀️ Día' : '🌙 Noche';
+        };
+        document.body.appendChild(btn);
     }
     
     // Configura los controles de la UI

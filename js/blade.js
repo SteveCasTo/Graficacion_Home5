@@ -9,15 +9,33 @@ class Blade {
         // Puntos de control de la brizna
         this.base = this.pool.get(x, CONFIG.CANVAS.HEIGHT - CONFIG.GRASS.BASE_OFFSET);
         
-        // Punta de la brizna
-        let h = random(CONFIG.GRASS.MIN_HEIGHT, CONFIG.GRASS.MAX_HEIGHT);
-        let dx = random(-30, 30);
-        this.tip = this.pool.get(x + dx, CONFIG.CANVAS.HEIGHT - CONFIG.GRASS.BASE_OFFSET - h);
+    // Punta de la brizna
+    this.height = random(CONFIG.GRASS.MIN_HEIGHT, CONFIG.GRASS.MAX_HEIGHT);
+    let h = this.height;
+    let dx = random(-30, 30);
+    this.tip = this.pool.get(x + dx, CONFIG.CANVAS.HEIGHT - CONFIG.GRASS.BASE_OFFSET - h);
+
+    // Grosor y color individual
+    this.widthFactor = random(0.7, 1.15); // Algunas más delgadas, otras más gruesas
+    // Color: algunas más amarillas o azuladas
+    let hueJitter = random(-10, 10);
+    let baseColor = generateGrassColor();
+    this.color = color(hue(baseColor) + hueJitter, saturation(baseColor), brightness(baseColor));
+
+    // ¿Tiene semilla/puntito?
+    this.hasSeed = random() < 0.22; // 22% de las briznas
+    this.seedColor = color(220, 220, 120, 220); // Amarillo claro
+    this.seedSize = random(2.2, 3.7);
         
-        // Punto de control para la curvatura Bézier
-        let cx = (this.base.x + this.tip.x) / 2 + random(-50, 50);
-        let cy = (this.base.y + this.tip.y) / 2 - random(40, 100);
-        this.ctrl = this.pool.get(cx, cy);
+    // Punto de control para la curvatura Bézier
+    let cx = (this.base.x + this.tip.x) / 2 + random(-50, 50);
+    let cy = (this.base.y + this.tip.y) / 2 - random(40, 100);
+    this.ctrl = this.pool.get(cx, cy);
+
+    // Parámetros de oscilación natural
+    this.oscPhase = random(TWO_PI);
+    this.oscSpeed = random(0.008, 0.022);
+    this.oscAmp = random(7, 18);
         
         // Color natural usando HSB
         this.color = generateGrassColor();
@@ -43,11 +61,15 @@ class Blade {
             resolution === this.lastResolution) {
             return this.cachedPoints;
         }
-        let cx = this.ctrl.x + wind;
-        let cy = this.ctrl.y;
-        // Aplica viento también a la punta
-        let tipX = this.tip.x + wind;
-        let tipY = this.tip.y;
+    // Oscilación natural de la brizna (independiente)
+    let t = millis ? millis() * 0.001 : 0;
+    let osc = sin(t * this.oscSpeed + this.oscPhase) * this.oscAmp * (0.7 + 0.3 * noise(this.base.x * 0.01, t * 0.1));
+
+    let cx = this.ctrl.x + wind * 0.7 + osc * 0.7;
+    let cy = this.ctrl.y + osc * 0.18;
+    // Aplica viento y oscilación también a la punta
+    let tipX = this.tip.x + wind + osc * 0.5;
+    let tipY = this.tip.y + osc * 0.12;
         if (this.cachedPoints) this.pool.releaseAll(this.cachedPoints);
         let pts = [];
         for (let i = 0; i <= resolution; i++) {
@@ -76,20 +98,36 @@ class Blade {
 
     // Dibuja la brizna en el canvas
     draw(windSystem, settings) {
-        let wind = windSystem.getWindAt(this.base.x, this.base.y, this.phase, this.speed, this.amp);
-        let resolution = this.getLODResolution(settings.resolution);
-        let pts = this.calculatePoints(wind, resolution);
-        
+    // Viento depende de la altura (más altas, más flexibles)
+    let wind = windSystem.getWindAt(this.base.x, this.base.y, this.phase, this.speed, this.amp) * map(this.height, CONFIG.GRASS.MIN_HEIGHT, CONFIG.GRASS.MAX_HEIGHT, 0.85, 1.18);
+    let resolution = this.getLODResolution(settings.resolution);
+    let pts = this.calculatePoints(wind, resolution);
+
+        // Motion blur: si el viento es fuerte, dibuja una sombra translúcida detrás
+        if (abs(wind) > 18 && settings.showFill) {
+            let blurOffset = constrain(wind * 0.18, -22, 22);
+            push();
+            translate(blurOffset, 0);
+            noStroke();
+            fill(60, 180, 80, 38); // Verde translúcido
+            beginShape();
+            for (let i = 0; i < pts.length; i++) vertex(pts[i].x, pts[i].y);
+            for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + 2);
+            endShape(CLOSE);
+            pop();
+        }
+
         // Dibujar relleno si está activado
         if (settings.showFill) {
             this.drawFill(pts, wind, settings.width);
+            // Añadir brillo sutil en la punta
+            this.drawTipHighlight(pts);
         }
-        
-        // Dibujar esqueleto si está activado y es visible
-        if (settings.showSkeleton && this.distanceFromCenter < CONFIG.PERFORMANCE.LOD_DISTANCE_THRESHOLD) {
+
+        if (settings.showSkeleton) {
             this.drawSkeleton(pts, settings.width);
         }
-        
+
         // Dibujar espina dorsal
         this.drawSpine(pts);
     }
@@ -99,25 +137,40 @@ class Blade {
         let left = [];
         let right = [];
         let n = pts.length;
-
+        let bladeWidth = width * this.widthFactor;
         // Calcular contornos izquierdo y derecho para todos los puntos
         for (let i = 0; i < n; i++) {
             let p = pts[i];
             // Para el último punto, usa la dirección del segmento anterior
             let q = (i < n - 1) ? pts[i + 1] : pts[i - 1];
             let ang = atan2(q.y - p.y, q.x - p.x) + HALF_PI;
+            // Factor de ancho que adelgaza hacia la punta
             let widthFactor = sin((i / (n - 1)) * PI);
-            let d = width * widthFactor;
+            let d = bladeWidth * widthFactor;
             left.push(this.pool.get(p.x + d * cos(ang), p.y + d * sin(ang)));
             right.push(this.pool.get(p.x - d * cos(ang), p.y - d * sin(ang)));
         }
 
-        // Dibujar relleno
+        // Dibujar relleno con suavizado
         noStroke();
         fill(this.color);
+        
+        // Usar curvas para suavizar bordes
         beginShape();
-        for (let v of left) vertex(v.x, v.y);
-        for (let i = right.length - 1; i >= 0; i--) vertex(right[i].x, right[i].y);
+        for (let i = 0; i < left.length; i++) {
+            if (i === 0) {
+                vertex(left[i].x, left[i].y);
+            } else {
+                vertex(left[i].x, left[i].y);
+            }
+        }
+        for (let i = right.length - 1; i >= 0; i--) {
+            if (i === right.length - 1) {
+                vertex(right[i].x, right[i].y);
+            } else {
+                vertex(right[i].x, right[i].y);
+            }
+        }
         endShape(CLOSE);
 
         this.pool.releaseAll(left);
@@ -126,8 +179,8 @@ class Blade {
     
     // Dibuja el esqueleto de la brizna
     drawSkeleton(pts, width) {
-        stroke(100, 200, 50, 150);
-        strokeWeight(1);
+        stroke(100, 200, 50, 180); // Aumentado alfa de 150 a 180
+        strokeWeight(1.2); // Aumentado de 1 a 1.2 para mejor visibilidad
         let w = width * 0.7;
         
         for (let i = 0; i < pts.length - 1; i++) {
@@ -143,14 +196,33 @@ class Blade {
 
     // Dibuja la espina dorsal de la brizna
     drawSpine(pts) {
-        stroke(0, 160, 20);
-        strokeWeight(1.5);
+        // Espina dorsal más visible y con mejor color
+        stroke(0, 140, 15, 200); // Color verde oscuro más opaco
+        strokeWeight(2); // Aumentado de 1.5 a 2 para más visibilidad
         noFill();
         beginShape();
         for (let p of pts) {
             vertex(p.x, p.y);
         }
         endShape();
+    }
+    
+    // Dibuja un brillo sutil en la punta del pasto
+    drawTipHighlight(pts) {
+        if (pts.length < 3) return;
+        // Obtener los últimos puntos (punta)
+        let tipPoint = pts[pts.length - 1];
+        // Crear un pequeño círculo brillante en la punta
+        noStroke();
+        fill(180, 255, 100, 80); // Verde claro con transparencia
+        circle(tipPoint.x, tipPoint.y, 3);
+        // Dibujar semilla/puntito si corresponde
+        if (this.hasSeed) {
+            fill(this.seedColor);
+            stroke(255, 255, 180, 120);
+            strokeWeight(0.7);
+            circle(tipPoint.x, tipPoint.y - this.seedSize * 0.7, this.seedSize);
+        }
     }
     
     destroy() {
